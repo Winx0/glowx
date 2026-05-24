@@ -2,23 +2,20 @@ import { useState } from 'react'
 import WalletInput from './components/WalletInput'
 import ChainSelector from './components/ChainSelector'
 import AirdropResults from './components/AirdropResults'
-import ApiKeySetup from './components/ApiKeySetup'
-import { checkAirdrops, getApiKey } from './services/airdropService'
+import { checkAirdrops } from './services/airdropService'
 
 function App() {
   const [walletAddress, setWalletAddress] = useState('')
-  const [selectedChains, setSelectedChains] = useState(['ethereum', 'arbitrum', 'optimism', 'base', 'solana', 'sui', 'aptos'])
+  const [selectedChains, setSelectedChains] = useState(['ethereum', 'arbitrum', 'optimism', 'base', 'polygon', 'bsc', 'zksync', 'linea', 'scroll'])
   const [results, setResults] = useState(null)
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState(null)
-  const [showSettings, setShowSettings] = useState(false)
 
   const handleCheck = async () => {
     if (!walletAddress.trim()) {
       setError('Masukkan alamat wallet')
       return
     }
-
     setLoading(true)
     setError(null)
     setResults(null)
@@ -35,7 +32,6 @@ function App() {
 
   return (
     <div className="min-h-screen px-4 py-8 md:py-12">
-      {/* Header */}
       <div className="max-w-4xl mx-auto text-center mb-10">
         <div className="flex items-center justify-center gap-3 mb-4">
           <div className="w-10 h-10 rounded-xl bg-gradient-to-br from-indigo-500 to-purple-600 flex items-center justify-center">
@@ -47,27 +43,12 @@ function App() {
             GlowX Airdrop Tracker
           </h1>
         </div>
-        <p className="text-[var(--color-text-muted)] text-lg">
-          Cek airdrop & token yang belum di-claim di semua jaringan
+        <p className="text-[var(--color-text-muted)]">
+          Cek airdrop & token belum diklaim — langsung dari blockchain
         </p>
-        <button
-          onClick={() => setShowSettings(!showSettings)}
-          className="mt-3 inline-flex items-center gap-2 px-4 py-2 rounded-lg text-sm bg-[var(--color-bg-card)] border border-[var(--color-border)] text-[var(--color-text-muted)] hover:text-white hover:border-indigo-500/50 transition-colors"
-        >
-          <svg xmlns="http://www.w3.org/2000/svg" className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M10.325 4.317c.426-1.756 2.924-1.756 3.35 0a1.724 1.724 0 002.573 1.066c1.543-.94 3.31.826 2.37 2.37a1.724 1.724 0 001.066 2.573c1.756.426 1.756 2.924 0 3.35a1.724 1.724 0 00-1.066 2.573c.94 1.543-.826 3.31-2.37 2.37a1.724 1.724 0 00-2.573 1.066c-.426 1.756-2.924 1.756-3.35 0a1.724 1.724 0 00-2.573-1.066c-1.543.94-3.31-.826-2.37-2.37a1.724 1.724 0 00-1.066-2.573c-1.756-.426-1.756-2.924 0-3.35a1.724 1.724 0 001.066-2.573c-.94-1.543.826-3.31 2.37-2.37.996.608 2.296.07 2.572-1.065z" />
-            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 12a3 3 0 11-6 0 3 3 0 016 0z" />
-          </svg>
-          {getApiKey() ? 'API Key ✓' : 'Settings'}
-        </button>
       </div>
 
-      {/* Main Content */}
       <div className="max-w-4xl mx-auto space-y-6">
-        {showSettings && (
-          <ApiKeySetup onSaved={() => setShowSettings(false)} />
-        )}
-
         <WalletInput
           walletAddress={walletAddress}
           setWalletAddress={setWalletAddress}
@@ -81,9 +62,7 @@ function App() {
         />
 
         {error && (
-          <div className="bg-red-500/10 border border-red-500/30 rounded-xl p-4 text-red-400 text-center">
-            {error}
-          </div>
+          <div className="bg-red-500/10 border border-red-500/30 rounded-xl p-4 text-red-400 text-center">{error}</div>
         )}
 
         {loading && (
@@ -93,7 +72,7 @@ function App() {
                 <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"></circle>
                 <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
               </svg>
-              <span className="text-[var(--color-text-muted)]">Mengecek...</span>
+              <span className="text-[var(--color-text-muted)]">Mengecek on-chain...</span>
             </div>
           </div>
         )}
@@ -105,7 +84,7 @@ function App() {
 
       <div className="max-w-4xl mx-auto mt-12 pt-6 border-t border-[var(--color-border)] text-center">
         <p className="text-[var(--color-text-muted)] text-sm">
-          Powered by <a href="https://drops.bot" target="_blank" rel="noopener noreferrer" className="text-indigo-400 hover:text-indigo-300 underline">Drops.bot</a>
+          Data langsung dari public RPC + <a href="https://drops.bot" target="_blank" rel="noopener noreferrer" className="text-indigo-400 underline">Drops.bot</a>
         </p>
       </div>
     </div>

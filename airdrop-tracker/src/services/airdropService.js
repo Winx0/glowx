@@ -1,32 +1,74 @@
 /**
  * GlowX Airdrop Tracker Service
  * 
- * Approach: Since Drops.bot's website is FREE (no API key needed for web),
- * we generate the correct Drops.bot URL for the user's wallet and open it directly.
- * 
- * For programmatic checks, we use the free public endpoints where possible.
+ * Uses multiple free sources to check wallet airdrop eligibility:
+ * 1. Drops.bot (free web checker - no API key needed via iframe/redirect)
+ * 2. Direct on-chain token balance checking via public RPCs
  */
 
-const DROPS_BASE = 'https://drops.bot'
-
-// Supported networks
-const NETWORK_MAP = {
-  ethereum: { type: 'evm', label: 'Ethereum', dropsPath: 'ethereum' },
-  arbitrum: { type: 'evm', label: 'Arbitrum', dropsPath: 'arbitrum' },
-  optimism: { type: 'evm', label: 'Optimism', dropsPath: 'optimism' },
-  base: { type: 'evm', label: 'Base', dropsPath: 'base' },
-  polygon: { type: 'evm', label: 'Polygon', dropsPath: 'polygon' },
-  bsc: { type: 'evm', label: 'BSC', dropsPath: 'bsc' },
-  avalanche: { type: 'evm', label: 'Avalanche', dropsPath: 'avalanche' },
-  zksync: { type: 'evm', label: 'zkSync', dropsPath: 'zksync' },
-  linea: { type: 'evm', label: 'Linea', dropsPath: 'linea' },
-  scroll: { type: 'evm', label: 'Scroll', dropsPath: 'scroll' },
-  starknet: { type: 'starknet', label: 'Starknet', dropsPath: 'starknet' },
-  solana: { type: 'solana', label: 'Solana', dropsPath: 'solana' },
-  sui: { type: 'sui', label: 'SUI', dropsPath: 'sui' },
-  aptos: { type: 'aptos', label: 'Aptos', dropsPath: 'aptos' },
-  cosmos: { type: 'cosmos', label: 'Cosmos', dropsPath: 'cosmos' },
+// Public RPC endpoints (no API key needed)
+const RPC_ENDPOINTS = {
+  ethereum: 'https://eth.llamarpc.com',
+  arbitrum: 'https://arb1.arbitrum.io/rpc',
+  optimism: 'https://mainnet.optimism.io',
+  base: 'https://mainnet.base.org',
+  polygon: 'https://polygon-rpc.com',
+  bsc: 'https://bsc-dataseed.binance.org',
+  avalanche: 'https://api.avax.network/ext/bc/C/rpc',
+  zksync: 'https://mainnet.era.zksync.io',
+  linea: 'https://rpc.linea.build',
+  scroll: 'https://rpc.scroll.io',
 }
+
+const CHAIN_LABELS = {
+  ethereum: 'Ethereum',
+  arbitrum: 'Arbitrum',
+  optimism: 'Optimism',
+  base: 'Base',
+  polygon: 'Polygon',
+  bsc: 'BSC',
+  avalanche: 'Avalanche',
+  zksync: 'zkSync',
+  linea: 'Linea',
+  scroll: 'Scroll',
+  solana: 'Solana',
+  sui: 'SUI',
+  aptos: 'Aptos',
+  cosmos: 'Cosmos',
+  starknet: 'Starknet',
+}
+
+// Known airdrop claim contracts that can be checked on-chain
+const CLAIM_CONTRACTS = [
+  {
+    name: 'LayerZero ZRO',
+    token: 'ZRO',
+    chain: 'arbitrum',
+    contract: '0xB09F16F625B363875e39ADa56C03682c4B8c01ef',
+    method: '0x1e83409a', // claimable(address)
+  },
+  {
+    name: 'Starknet STRK Provisions',
+    token: 'STRK',
+    chain: 'ethereum',
+    contract: '0x1e8aba82a06ea53e668a210ffaa3e8f6b1c0e36f',
+    method: '0x1e83409a',
+  },
+  {
+    name: 'EigenLayer EIGEN',
+    token: 'EIGEN',
+    chain: 'ethereum',
+    contract: '0x035bdA7EE80e42Ec7cF6154463Fd557c3e86e66b',
+    method: '0x1e83409a',
+  },
+  {
+    name: 'Scroll SCR',
+    token: 'SCR',
+    chain: 'scroll',
+    contract: '0x67fd208EB42B8B2d5E2Ec8b6aa7e4a7d45A3D1E5',
+    method: '0x1e83409a',
+  },
+]
 
 /**
  * Detect wallet address type
@@ -35,162 +77,151 @@ export function detectAddressType(address) {
   if (/^0x[a-fA-F0-9]{40}$/.test(address)) return 'evm'
   if (/^[1-9A-HJ-NP-Za-km-z]{32,44}$/.test(address)) return 'solana'
   if (/^0x[a-fA-F0-9]{64}$/.test(address)) return 'sui'
-  if (/^(cosmos|osmo|juno|stars|atom|evmos|inj|celestia|dym)[a-z0-9]{38,}$/.test(address)) return 'cosmos'
-  if (/^0x[a-fA-F0-9]{62,64}$/.test(address)) return 'aptos'
-  if (/^0x0[a-fA-F0-9]{63}$/.test(address)) return 'starknet'
+  if (/^(cosmos|osmo|juno|stars|celestia|dym)[a-z0-9]{38,}$/.test(address)) return 'cosmos'
   return 'unknown'
 }
 
 /**
- * Get the Drops.bot URL to check a wallet
+ * Get native balance from public RPC (no API key)
  */
-export function getDropsUrl(address) {
-  return `${DROPS_BASE}/address/${address}`
+async function getNativeBalance(address, chain) {
+  const rpc = RPC_ENDPOINTS[chain]
+  if (!rpc) return null
+
+  try {
+    const res = await fetch(rpc, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        jsonrpc: '2.0',
+        id: 1,
+        method: 'eth_getBalance',
+        params: [address, 'latest'],
+      }),
+    })
+    const data = await res.json()
+    if (data.result) {
+      const wei = BigInt(data.result)
+      const eth = Number(wei) / 1e18
+      return eth
+    }
+  } catch (e) {
+    console.warn(`[${chain}] RPC error:`, e.message)
+  }
+  return null
 }
 
 /**
- * Get compatible chains for an address type
+ * Check if address has claimable amount on a known airdrop contract
  */
-export function getCompatibleChains(address, selectedChains) {
-  const addressType = detectAddressType(address)
-  return selectedChains.filter(chain => {
-    const config = NETWORK_MAP[chain]
-    if (!config) return false
-    if (addressType === 'evm' && config.type === 'evm') return true
-    if (addressType === config.type) return true
-    return false
-  })
+async function checkClaimContract(address, airdrop) {
+  const rpc = RPC_ENDPOINTS[airdrop.chain]
+  if (!rpc) return null
+
+  try {
+    // eth_call to check claimable balance
+    const paddedAddress = address.toLowerCase().replace('0x', '').padStart(64, '0')
+    const callData = airdrop.method + paddedAddress
+
+    const res = await fetch(rpc, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        jsonrpc: '2.0',
+        id: 1,
+        method: 'eth_call',
+        params: [{ to: airdrop.contract, data: callData }, 'latest'],
+      }),
+    })
+    const data = await res.json()
+
+    if (data.result && data.result !== '0x' && data.result !== '0x0000000000000000000000000000000000000000000000000000000000000000') {
+      const amount = Number(BigInt(data.result)) / 1e18
+      if (amount > 0) {
+        return { ...airdrop, amount, claimable: true }
+      }
+    }
+  } catch (e) {
+    // Contract might not support this method - that's fine
+  }
+  return null
 }
 
 /**
- * Try to fetch airdrop data from Drops.bot API (if API key is set)
- * Falls back to redirect mode if no key
+ * Main: check wallet across all selected chains
  */
 export async function checkAirdrops(address, selectedChains) {
   const addressType = detectAddressType(address)
 
   if (addressType === 'unknown') {
-    throw new Error('Format alamat tidak dikenali. Gunakan EVM (0x...), Solana, SUI, Aptos, atau Cosmos.')
+    throw new Error('Format alamat tidak dikenali.')
   }
 
-  const compatibleChains = getCompatibleChains(address, selectedChains)
-
-  if (compatibleChains.length === 0) {
-    throw new Error(`Alamat ${addressType.toUpperCase()} tidak cocok dengan jaringan yang dipilih.`)
-  }
-
-  // Try Drops.bot API if user has key
-  const apiKey = localStorage.getItem('glowx_drops_api_key')
-  
-  if (apiKey) {
-    return await fetchFromDropsAPI(address, compatibleChains, addressType, apiKey)
-  }
-
-  // No API key — return redirect info (free mode)
-  return {
-    mode: 'redirect',
-    address,
-    addressType,
-    checkedChains: compatibleChains.length,
-    compatibleChains: compatibleChains.map(c => NETWORK_MAP[c]?.label || c),
-    dropsUrl: getDropsUrl(address),
-    airdrops: [],
-    totalValue: 0,
-    timestamp: new Date().toISOString(),
-  }
-}
-
-/**
- * Fetch from Drops.bot API with key
- */
-async function fetchFromDropsAPI(address, chains, addressType, apiKey) {
-  const networkName = addressType === 'evm' ? 'evm' : addressType
-
-  const results = await Promise.allSettled([
-    // Airdrops list
-    fetch(`https://api.drops.bot/shared/v1/airdrops/${networkName}/${address}`, {
-      headers: { 'x-api-key': apiKey },
-    }).then(r => {
-      if (r.status === 401) throw new Error('API_KEY_INVALID')
-      if (r.status === 429) throw new Error('RATE_LIMITED')
-      return r.ok ? r.json() : null
-    }),
-    // Value
-    fetch(`https://api.drops.bot/shared/v1/value/airdrops/${networkName}/${address}`, {
-      headers: { 'x-api-key': apiKey },
-    }).then(r => r.ok ? r.json() : null),
-  ])
-
-  // Check for errors
-  for (const r of results) {
-    if (r.status === 'rejected') {
-      if (r.reason?.message === 'API_KEY_INVALID') {
-        throw new Error('API key tidak valid.')
-      }
-      if (r.reason?.message === 'RATE_LIMITED') {
-        throw new Error('Rate limit. Coba lagi nanti.')
-      }
+  if (addressType !== 'evm') {
+    // Non-EVM: langsung redirect ke Drops.bot
+    return {
+      mode: 'redirect',
+      address,
+      addressType,
+      dropsUrl: `https://drops.bot/address/${address}`,
+      compatibleChains: selectedChains.filter(c => c === addressType).map(c => CHAIN_LABELS[c] || c),
+      airdrops: [],
+      balances: [],
+      timestamp: new Date().toISOString(),
     }
   }
 
-  const airdropsData = results[0].status === 'fulfilled' ? results[0].value : null
-  const valueData = results[1].status === 'fulfilled' ? results[1].value : null
+  // EVM: check on-chain
+  const evmChains = selectedChains.filter(c => RPC_ENDPOINTS[c])
 
-  // Parse airdrops
-  const airdrops = []
-  const rawAirdrops = airdropsData?.airdrops || airdropsData?.data || (Array.isArray(airdropsData) ? airdropsData : [])
-  
-  for (const drop of rawAirdrops) {
-    airdrops.push({
-      name: drop.name || drop.title || 'Airdrop',
-      token: drop.token || drop.symbol || '',
-      chain: chains.map(c => NETWORK_MAP[c]?.label).filter(Boolean).join(', '),
-      status: mapStatus(drop.status),
-      value: drop.value || drop.usd_value || null,
-      amount: drop.amount ? `${drop.amount} ${drop.token || ''}`.trim() : null,
-      claimUrl: drop.claim_url || drop.claimUrl || null,
-      deadline: drop.deadline || drop.expires_at || null,
-    })
-  }
+  // 1. Check native balances on all chains (parallel)
+  const balancePromises = evmChains.map(async (chain) => {
+    const bal = await getNativeBalance(address, chain)
+    return { chain, label: CHAIN_LABELS[chain], balance: bal }
+  })
 
-  // Sort
-  const order = { claimable: 0, unclaimed: 1, expired: 2, claimed: 3 }
-  airdrops.sort((a, b) => (order[a.status] || 99) - (order[b.status] || 99))
+  // 2. Check known airdrop claim contracts
+  const claimPromises = CLAIM_CONTRACTS
+    .filter(a => evmChains.includes(a.chain))
+    .map(a => checkClaimContract(address, a))
 
-  const totalValue = valueData?.total_value || valueData?.totalValue || valueData?.value || 0
+  const [balances, claims] = await Promise.all([
+    Promise.all(balancePromises),
+    Promise.all(claimPromises),
+  ])
+
+  // Filter active balances
+  const activeChains = balances.filter(b => b.balance !== null && b.balance > 0)
+
+  // Filter valid claims
+  const validClaims = claims.filter(Boolean)
+
+  // Build airdrop results from on-chain data
+  const airdrops = validClaims.map(claim => ({
+    name: claim.name,
+    token: claim.token,
+    chain: CHAIN_LABELS[claim.chain] || claim.chain,
+    status: 'claimable',
+    amount: `${claim.amount.toFixed(2)} ${claim.token}`,
+    value: null,
+    claimUrl: null,
+  }))
 
   return {
-    mode: 'api',
+    mode: 'onchain',
     address,
     addressType,
-    checkedChains: chains.length,
-    compatibleChains: chains.map(c => NETWORK_MAP[c]?.label || c),
-    dropsUrl: getDropsUrl(address),
+    dropsUrl: `https://drops.bot/address/${address}`,
+    compatibleChains: evmChains.map(c => CHAIN_LABELS[c] || c),
     airdrops,
-    totalValue: typeof totalValue === 'string' ? parseFloat(totalValue.replace(/[^0-9.]/g, '')) || 0 : totalValue,
+    balances: activeChains,
+    totalChains: evmChains.length,
+    activeChains: activeChains.length,
     timestamp: new Date().toISOString(),
   }
 }
 
-function mapStatus(status) {
-  if (!status) return 'unclaimed'
-  const s = status.toLowerCase()
-  if (s.includes('claim') && !s.includes('un')) return 'claimable'
-  if (s.includes('unclaim') || s.includes('pending') || s.includes('eligible')) return 'unclaimed'
-  if (s.includes('expire') || s.includes('miss')) return 'expired'
-  if (s.includes('claimed') || s.includes('done')) return 'claimed'
-  return 'unclaimed'
-}
-
-/**
- * Save/get/remove API key helpers
- */
-export function getApiKey() {
-  return localStorage.getItem('glowx_drops_api_key') || ''
-}
-export function saveApiKey(key) {
-  localStorage.setItem('glowx_drops_api_key', key)
-}
-export function removeApiKey() {
-  localStorage.removeItem('glowx_drops_api_key')
-}
+// Keep these for settings compatibility
+export function getApiKey() { return localStorage.getItem('glowx_drops_api_key') || '' }
+export function saveApiKey(key) { localStorage.setItem('glowx_drops_api_key', key) }
+export function removeApiKey() { localStorage.removeItem('glowx_drops_api_key') }
