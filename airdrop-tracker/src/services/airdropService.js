@@ -1,12 +1,21 @@
 /**
- * GlowX Airdrop Tracker - Ankr Advanced API (FREE, no key)
- * https://www.ankr.com/docs/advanced-api/token-methods/
+ * GlowX Airdrop Tracker - Public RPC (100% free, no API key)
  */
 
-const ANKR_URL = 'https://rpc.ankr.com/multichain'
+const RPCS = {
+  ethereum: 'https://eth.llamarpc.com',
+  arbitrum: 'https://arb1.arbitrum.io/rpc',
+  optimism: 'https://mainnet.optimism.io',
+  base: 'https://mainnet.base.org',
+  polygon: 'https://polygon-rpc.com',
+  bsc: 'https://bsc-dataseed1.binance.org',
+  avalanche: 'https://api.avax.network/ext/bc/C/rpc',
+  linea: 'https://rpc.linea.build',
+  scroll: 'https://rpc.scroll.io',
+}
 
 const CHAIN_LABELS = {
-  eth: 'Ethereum',
+  ethereum: 'Ethereum',
   arbitrum: 'Arbitrum',
   optimism: 'Optimism',
   base: 'Base',
@@ -15,157 +24,94 @@ const CHAIN_LABELS = {
   avalanche: 'Avalanche',
   linea: 'Linea',
   scroll: 'Scroll',
-  fantom: 'Fantom',
 }
 
-// Map our chain IDs to Ankr blockchain names
-const CHAIN_TO_ANKR = {
-  ethereum: 'eth',
-  arbitrum: 'arbitrum',
-  optimism: 'optimism',
-  base: 'base',
-  polygon: 'polygon',
-  bsc: 'bsc',
-  avalanche: 'avalanche',
-  linea: 'linea',
-  scroll: 'scroll',
-  fantom: 'fantom',
+const NATIVE_SYMBOLS = {
+  ethereum: 'ETH',
+  arbitrum: 'ETH',
+  optimism: 'ETH',
+  base: 'ETH',
+  polygon: 'POL',
+  bsc: 'BNB',
+  avalanche: 'AVAX',
+  linea: 'ETH',
+  scroll: 'ETH',
 }
 
 export function detectAddressType(address) {
   if (/^0x[a-fA-F0-9]{40}$/i.test(address)) return 'evm'
-  if (/^[1-9A-HJ-NP-Za-km-z]{32,44}$/.test(address)) return 'solana'
   return 'unknown'
 }
 
-/**
- * Ankr: get token balances across multiple chains (FREE)
- */
-async function ankrGetBalances(address, chains) {
-  const blockchains = chains.map(c => CHAIN_TO_ANKR[c]).filter(Boolean)
-
-  const res = await fetch(ANKR_URL, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({
-      jsonrpc: '2.0',
-      id: 1,
-      method: 'ankr_getAccountBalance',
-      params: {
-        walletAddress: address,
-        blockchain: blockchains,
-      },
-    }),
-  })
-
-  const data = await res.json()
-  if (data.error) throw new Error(data.error.message || 'Ankr API error')
-  return data.result
+async function getBalance(address, chain) {
+  const rpc = RPCS[chain]
+  if (!rpc) return null
+  try {
+    const res = await fetch(rpc, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ jsonrpc: '2.0', id: 1, method: 'eth_getBalance', params: [address, 'latest'] }),
+    })
+    const data = await res.json()
+    if (data.result) {
+      return Number(BigInt(data.result)) / 1e18
+    }
+  } catch (e) { /* skip */ }
+  return null
 }
 
-/**
- * Ankr: get token transfers (to detect airdrops received)
- */
-async function ankrGetTokenTransfers(address, chains) {
-  const blockchains = chains.map(c => CHAIN_TO_ANKR[c]).filter(Boolean)
-
-  const res = await fetch(ANKR_URL, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({
-      jsonrpc: '2.0',
-      id: 2,
-      method: 'ankr_getTokenTransfers',
-      params: {
-        address: [address],
-        blockchain: blockchains,
-        descOrder: true,
-        pageSize: 50,
-      },
-    }),
-  })
-
-  const data = await res.json()
-  if (data.error) return null
-  return data.result
+async function getTxCount(address, chain) {
+  const rpc = RPCS[chain]
+  if (!rpc) return 0
+  try {
+    const res = await fetch(rpc, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ jsonrpc: '2.0', id: 1, method: 'eth_getTransactionCount', params: [address, 'latest'] }),
+    })
+    const data = await res.json()
+    if (data.result) return Number(BigInt(data.result))
+  } catch (e) { /* skip */ }
+  return 0
 }
 
-/**
- * Main check function
- */
 export async function checkAirdrops(address, selectedChains) {
   const addressType = detectAddressType(address)
   if (addressType !== 'evm') {
-    throw new Error('Saat ini hanya support alamat EVM (0x...). Solana segera.')
+    throw new Error('Hanya support alamat EVM (0x...).')
   }
 
-  // Fetch balances and transfers in parallel
-  const [balanceResult, transferResult] = await Promise.all([
-    ankrGetBalances(address, selectedChains),
-    ankrGetTokenTransfers(address, selectedChains),
-  ])
+  const chains = selectedChains.filter(c => RPCS[c])
 
-  // Process balances
-  const assets = balanceResult?.assets || []
-  const tokens = assets
-    .filter(a => parseFloat(a.balanceUsd || '0') > 0.01)
-    .map(a => ({
-      name: a.tokenName || 'Unknown',
-      symbol: a.tokenSymbol || '???',
-      chain: CHAIN_LABELS[a.blockchain] || a.blockchain,
-      balance: parseFloat(a.balance || '0'),
-      balanceUsd: parseFloat(a.balanceUsd || '0'),
-      thumbnail: a.thumbnail || null,
-      contractAddress: a.contractAddress || null,
-      tokenType: a.tokenType || 'ERC20',
-    }))
-    .sort((a, b) => b.balanceUsd - a.balanceUsd)
-
-  // Process transfers to find potential airdrops (tokens received from unknown contracts)
-  const transfers = transferResult?.transfers || []
-  const incomingTokens = transfers
-    .filter(t => t.toAddress?.toLowerCase() === address.toLowerCase())
-    .filter(t => t.fromAddress !== '0x0000000000000000000000000000000000000000') // skip mints? actually airdrops often come from 0x0
-    .slice(0, 20)
-
-  // Identify potential airdrops: tokens received that user still holds
-  const heldSymbols = new Set(tokens.map(t => t.symbol.toLowerCase()))
-  const potentialAirdrops = incomingTokens
-    .filter(t => {
-      const sym = (t.tokenSymbol || '').toLowerCase()
-      return sym && heldSymbols.has(sym)
+  // Fetch balances and tx counts in parallel
+  const results = await Promise.all(
+    chains.map(async (chain) => {
+      const [balance, txCount] = await Promise.all([
+        getBalance(address, chain),
+        getTxCount(address, chain),
+      ])
+      return { chain, balance, txCount }
     })
-    .reduce((acc, t) => {
-      const key = `${t.tokenSymbol}-${t.blockchain}`
-      if (!acc.has(key)) {
-        acc.set(key, {
-          name: t.tokenName || t.tokenSymbol || 'Unknown',
-          token: t.tokenSymbol || '',
-          chain: CHAIN_LABELS[t.blockchain] || t.blockchain,
-          status: 'claimable',
-          amount: null,
-          value: null,
-        })
-      }
-      return acc
-    }, new Map())
+  )
 
-  const totalUsd = tokens.reduce((sum, t) => sum + t.balanceUsd, 0)
+  const tokens = results
+    .filter(r => r.balance !== null)
+    .map(r => ({
+      symbol: NATIVE_SYMBOLS[r.chain],
+      chain: CHAIN_LABELS[r.chain],
+      balance: r.balance,
+      txCount: r.txCount,
+    }))
+
+  const activeChains = tokens.filter(t => t.balance > 0 || t.txCount > 0)
 
   return {
     address,
-    addressType,
     tokens,
-    airdrops: [...potentialAirdrops.values()],
-    totalUsd,
-    totalTokens: tokens.length,
-    chainsChecked: selectedChains.length,
-    compatibleChains: selectedChains.map(c => CHAIN_LABELS[CHAIN_TO_ANKR[c]] || c),
+    activeChains: activeChains.length,
+    totalChains: chains.length,
+    compatibleChains: chains.map(c => CHAIN_LABELS[c]),
     dropsUrl: `https://drops.bot/address/${address}`,
     timestamp: new Date().toISOString(),
   }
 }
-
-export function getApiKey() { return '' }
-export function saveApiKey() {}
-export function removeApiKey() {}
