@@ -1,87 +1,79 @@
-const STATUS_STYLES = {
-  claimable: { bg: 'bg-green-500/10', border: 'border-green-500/30', badge: 'bg-green-500/20 text-green-400', label: 'Bisa Diklaim' },
-  unclaimed: { bg: 'bg-yellow-500/10', border: 'border-yellow-500/30', badge: 'bg-yellow-500/20 text-yellow-400', label: 'Belum Diklaim' },
-  expired: { bg: 'bg-red-500/10', border: 'border-red-500/30', badge: 'bg-red-500/20 text-red-400', label: 'Kadaluarsa' },
-  claimed: { bg: 'bg-gray-500/10', border: 'border-gray-500/30', badge: 'bg-gray-500/20 text-gray-400', label: 'Sudah Diklaim' },
-}
-
-function AirdropCard({ airdrop }) {
-  const status = STATUS_STYLES[airdrop.status] || STATUS_STYLES.unclaimed
-  return (
-    <div className={`${status.bg} border ${status.border} rounded-xl p-5 hover:scale-[1.01] transition-all`}>
-      <div className="flex items-start justify-between gap-4">
-        <div className="flex-1 min-w-0">
-          <div className="flex items-center gap-2 mb-2 flex-wrap">
-            <h3 className="font-semibold text-white">{airdrop.name}</h3>
-            <span className={`px-2 py-0.5 rounded-full text-xs font-medium ${status.badge}`}>{status.label}</span>
-          </div>
-          <div className="flex flex-wrap items-center gap-3 text-sm text-[var(--color-text-muted)]">
-            {airdrop.chain && <span>🔗 {airdrop.chain}</span>}
-            {airdrop.token && <span>🪙 {airdrop.token}</span>}
-            {airdrop.amount && <span>💰 {airdrop.amount}</span>}
-          </div>
-        </div>
-        {airdrop.value && (
-          <p className="text-lg font-bold text-white shrink-0">${airdrop.value}</p>
-        )}
-      </div>
-    </div>
-  )
-}
-
 export default function AirdropResults({ results, walletAddress }) {
   return (
     <div className="space-y-6">
-      {/* On-chain balance info */}
-      {results.balances && results.balances.length > 0 && (
-        <div className="bg-[var(--color-bg-card)] rounded-xl border border-[var(--color-border)] p-5">
-          <h3 className="text-white font-semibold mb-3">Aktivitas Wallet (On-Chain)</h3>
-          <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 gap-3">
-            {results.balances.map((b, i) => (
-              <div key={i} className="bg-[var(--color-bg-dark)] rounded-lg p-3 text-center">
-                <p className="text-xs text-[var(--color-text-muted)]">{b.label}</p>
-                <p className="text-sm font-mono text-white mt-1">
-                  {b.balance < 0.0001 ? '< 0.0001' : b.balance.toFixed(4)}
-                </p>
-              </div>
-            ))}
+      {/* Summary */}
+      <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
+        <div className="bg-[var(--color-bg-card)] rounded-xl border border-[var(--color-border)] p-5 text-center">
+          <p className="text-[var(--color-text-muted)] text-sm mb-1">Total Tokens</p>
+          <p className="text-2xl font-bold text-white">{results.totalTokens}</p>
+        </div>
+        <div className="bg-[var(--color-bg-card)] rounded-xl border border-[var(--color-border)] p-5 text-center">
+          <p className="text-[var(--color-text-muted)] text-sm mb-1">Total Nilai</p>
+          <p className="text-2xl font-bold text-green-400">${results.totalUsd.toFixed(2)}</p>
+        </div>
+        <div className="bg-[var(--color-bg-card)] rounded-xl border border-[var(--color-border)] p-5 text-center">
+          <p className="text-[var(--color-text-muted)] text-sm mb-1">Chains Dicek</p>
+          <p className="text-2xl font-bold text-indigo-400">{results.chainsChecked}</p>
+        </div>
+      </div>
+
+      {/* Live badge */}
+      <div className="flex items-center gap-2 px-4 py-2 bg-green-500/10 border border-green-500/20 rounded-lg">
+        <span className="text-green-400 text-xs font-medium">● LIVE</span>
+        <span className="text-xs text-[var(--color-text-muted)]">Ankr API • {results.compatibleChains.join(', ')}</span>
+      </div>
+
+      {/* Token Balances */}
+      {results.tokens.length > 0 && (
+        <div>
+          <h3 className="text-white font-semibold mb-3">Token Balances</h3>
+          <div className="bg-[var(--color-bg-card)] rounded-xl border border-[var(--color-border)] overflow-hidden">
+            <table className="w-full text-sm">
+              <thead>
+                <tr className="border-b border-[var(--color-border)] text-[var(--color-text-muted)]">
+                  <th className="text-left p-3">Token</th>
+                  <th className="text-left p-3">Chain</th>
+                  <th className="text-right p-3">Balance</th>
+                  <th className="text-right p-3">USD</th>
+                </tr>
+              </thead>
+              <tbody>
+                {results.tokens.slice(0, 30).map((t, i) => (
+                  <tr key={i} className="border-b border-[var(--color-border)] last:border-0 hover:bg-[var(--color-bg-card-hover)]">
+                    <td className="p-3 text-white font-medium">{t.symbol}</td>
+                    <td className="p-3 text-[var(--color-text-muted)]">{t.chain}</td>
+                    <td className="p-3 text-right text-white font-mono">{t.balance < 0.001 ? '< 0.001' : t.balance.toFixed(4)}</td>
+                    <td className="p-3 text-right text-green-400">${t.balanceUsd.toFixed(2)}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
           </div>
-          <p className="text-xs text-[var(--color-text-muted)] mt-3">
-            Wallet aktif di {results.activeChains} dari {results.totalChains} jaringan yang dicek
-          </p>
         </div>
       )}
 
-      {/* Airdrops from on-chain checks */}
-      {results.airdrops && results.airdrops.length > 0 && (
-        <div className="space-y-3">
-          <h3 className="text-white font-semibold">Airdrop Terdeteksi (On-Chain)</h3>
-          {results.airdrops.map((a, i) => <AirdropCard key={i} airdrop={a} />)}
+      {results.tokens.length === 0 && (
+        <div className="bg-[var(--color-bg-card)] rounded-xl border border-[var(--color-border)] p-8 text-center">
+          <p className="text-[var(--color-text-muted)]">Tidak ada token ditemukan di wallet ini.</p>
         </div>
       )}
 
-      {/* Always show Drops.bot full check */}
+      {/* Drops.bot full airdrop check */}
       <div className="bg-gradient-to-br from-indigo-500/10 to-purple-500/10 border border-indigo-500/30 rounded-xl p-6 text-center">
-        <p className="text-white font-semibold text-lg mb-2">Cek Lengkap di Drops.bot</p>
-        <p className="text-[var(--color-text-muted)] text-sm mb-4">
-          Drops.bot mengecek 388+ airdrop di semua jaringan — gratis, tanpa login.
-        </p>
+        <p className="text-white font-semibold mb-2">Cek Airdrop Lengkap (388+ projects)</p>
+        <p className="text-[var(--color-text-muted)] text-sm mb-4">Drops.bot — gratis, tanpa login</p>
         <a
           href={results.dropsUrl}
           target="_blank"
           rel="noopener noreferrer"
-          className="inline-flex items-center gap-2 px-6 py-3 bg-gradient-to-r from-indigo-600 to-purple-600 hover:from-indigo-500 hover:to-purple-500 text-white font-semibold rounded-xl transition-all shadow-lg shadow-indigo-500/20"
+          className="inline-flex items-center gap-2 px-6 py-3 bg-gradient-to-r from-indigo-600 to-purple-600 hover:from-indigo-500 hover:to-purple-500 text-white font-semibold rounded-xl shadow-lg shadow-indigo-500/20"
         >
-          Buka Drops.bot untuk {walletAddress.slice(0, 6)}...{walletAddress.slice(-4)}
-          <svg xmlns="http://www.w3.org/2000/svg" className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M10 6H6a2 2 0 00-2 2v10a2 2 0 002 2h10a2 2 0 002-2v-4M14 4h6m0 0v6m0-6L10 14" />
-          </svg>
+          Buka Drops.bot →
         </a>
       </div>
 
-      {/* Timestamp */}
       <p className="text-center text-xs text-[var(--color-text-muted)]">
-        Dicek: {new Date(results.timestamp).toLocaleString('id-ID')} • Jaringan: {results.compatibleChains?.join(', ')}
+        {new Date(results.timestamp).toLocaleString('id-ID')}
       </p>
     </div>
   )
