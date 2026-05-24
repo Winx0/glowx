@@ -1,34 +1,31 @@
 /**
  * GlowX Airdrop Tracker Service
  * 
- * Uses Drops.bot API for real airdrop eligibility checking.
- * API Docs: https://docs.drops.bot
+ * Approach: Since Drops.bot's website is FREE (no API key needed for web),
+ * we generate the correct Drops.bot URL for the user's wallet and open it directly.
  * 
- * Endpoints used:
- * - GET /shared/v1/airdrops/{network}/{address} (free - basic info)
- * - GET /shared/v1/value/airdrops/{network}/{address} (free - total value)
- * - GET /shared/v1/airdrops/{network}/{address}/full (paid - full details)
+ * For programmatic checks, we use the free public endpoints where possible.
  */
 
-const BASE_URL = 'https://api.drops.bot/shared/v1'
+const DROPS_BASE = 'https://drops.bot'
 
-// Supported networks by Drops.bot API
+// Supported networks
 const NETWORK_MAP = {
-  ethereum: { apiName: 'evm', addressType: 'evm', label: 'Ethereum' },
-  arbitrum: { apiName: 'arbitrum', addressType: 'evm', label: 'Arbitrum' },
-  optimism: { apiName: 'optimism', addressType: 'evm', label: 'Optimism' },
-  base: { apiName: 'base', addressType: 'evm', label: 'Base' },
-  polygon: { apiName: 'polygon', addressType: 'evm', label: 'Polygon' },
-  bsc: { apiName: 'bsc', addressType: 'evm', label: 'BSC' },
-  avalanche: { apiName: 'avalanche', addressType: 'evm', label: 'Avalanche' },
-  zksync: { apiName: 'zksync', addressType: 'evm', label: 'zkSync' },
-  linea: { apiName: 'linea', addressType: 'evm', label: 'Linea' },
-  scroll: { apiName: 'scroll', addressType: 'evm', label: 'Scroll' },
-  starknet: { apiName: 'starknet', addressType: 'starknet', label: 'Starknet' },
-  solana: { apiName: 'solana', addressType: 'solana', label: 'Solana' },
-  sui: { apiName: 'sui', addressType: 'sui', label: 'SUI' },
-  aptos: { apiName: 'aptos', addressType: 'aptos', label: 'Aptos' },
-  cosmos: { apiName: 'cosmos', addressType: 'cosmos', label: 'Cosmos' },
+  ethereum: { type: 'evm', label: 'Ethereum', dropsPath: 'ethereum' },
+  arbitrum: { type: 'evm', label: 'Arbitrum', dropsPath: 'arbitrum' },
+  optimism: { type: 'evm', label: 'Optimism', dropsPath: 'optimism' },
+  base: { type: 'evm', label: 'Base', dropsPath: 'base' },
+  polygon: { type: 'evm', label: 'Polygon', dropsPath: 'polygon' },
+  bsc: { type: 'evm', label: 'BSC', dropsPath: 'bsc' },
+  avalanche: { type: 'evm', label: 'Avalanche', dropsPath: 'avalanche' },
+  zksync: { type: 'evm', label: 'zkSync', dropsPath: 'zksync' },
+  linea: { type: 'evm', label: 'Linea', dropsPath: 'linea' },
+  scroll: { type: 'evm', label: 'Scroll', dropsPath: 'scroll' },
+  starknet: { type: 'starknet', label: 'Starknet', dropsPath: 'starknet' },
+  solana: { type: 'solana', label: 'Solana', dropsPath: 'solana' },
+  sui: { type: 'sui', label: 'SUI', dropsPath: 'sui' },
+  aptos: { type: 'aptos', label: 'Aptos', dropsPath: 'aptos' },
+  cosmos: { type: 'cosmos', label: 'Cosmos', dropsPath: 'cosmos' },
 }
 
 /**
@@ -45,242 +42,136 @@ export function detectAddressType(address) {
 }
 
 /**
- * Get API key from localStorage
+ * Get the Drops.bot URL to check a wallet
  */
-export function getApiKey() {
-  return localStorage.getItem('glowx_drops_api_key') || ''
+export function getDropsUrl(address) {
+  return `${DROPS_BASE}/address/${address}`
 }
 
 /**
- * Save API key to localStorage
+ * Get compatible chains for an address type
  */
-export function saveApiKey(key) {
-  localStorage.setItem('glowx_drops_api_key', key)
+export function getCompatibleChains(address, selectedChains) {
+  const addressType = detectAddressType(address)
+  return selectedChains.filter(chain => {
+    const config = NETWORK_MAP[chain]
+    if (!config) return false
+    if (addressType === 'evm' && config.type === 'evm') return true
+    if (addressType === config.type) return true
+    return false
+  })
 }
 
 /**
- * Remove API key
- */
-export function removeApiKey() {
-  localStorage.removeItem('glowx_drops_api_key')
-}
-
-/**
- * Fetch airdrops for a specific network using Drops.bot API
- * Free endpoint: returns airdrop names/count but details hidden
- */
-async function fetchAirdropsForNetwork(address, network, apiKey) {
-  const networkConfig = NETWORK_MAP[network]
-  if (!networkConfig) return null
-
-  const url = `${BASE_URL}/airdrops/${networkConfig.apiName}/${address}`
-
-  try {
-    const response = await fetch(url, {
-      headers: {
-        'x-api-key': apiKey,
-        'Content-Type': 'application/json',
-      },
-    })
-
-    if (response.status === 401) {
-      throw new Error('API_KEY_INVALID')
-    }
-
-    if (response.status === 429) {
-      throw new Error('RATE_LIMITED')
-    }
-
-    if (!response.ok) {
-      console.warn(`[${network}] API error: ${response.status}`)
-      return null
-    }
-
-    const data = await response.json()
-    return { network, networkLabel: networkConfig.label, data }
-  } catch (error) {
-    if (error.message === 'API_KEY_INVALID' || error.message === 'RATE_LIMITED') {
-      throw error
-    }
-    console.warn(`[${network}] Fetch failed:`, error.message)
-    return null
-  }
-}
-
-/**
- * Fetch total airdrop value for a network
- * Free endpoint: returns total fiat value
- */
-async function fetchAirdropValue(address, network, apiKey) {
-  const networkConfig = NETWORK_MAP[network]
-  if (!networkConfig) return null
-
-  const url = `${BASE_URL}/value/airdrops/${networkConfig.apiName}/${address}`
-
-  try {
-    const response = await fetch(url, {
-      headers: {
-        'x-api-key': apiKey,
-        'Content-Type': 'application/json',
-      },
-    })
-
-    if (!response.ok) return null
-
-    const data = await response.json()
-    return { network, networkLabel: networkConfig.label, data }
-  } catch (error) {
-    console.warn(`[${network}] Value fetch failed:`, error.message)
-    return null
-  }
-}
-
-/**
- * Main function: check airdrops across selected chains
+ * Try to fetch airdrop data from Drops.bot API (if API key is set)
+ * Falls back to redirect mode if no key
  */
 export async function checkAirdrops(address, selectedChains) {
   const addressType = detectAddressType(address)
-  const apiKey = getApiKey()
-
-  if (!apiKey) {
-    throw new Error('API_KEY_MISSING')
-  }
 
   if (addressType === 'unknown') {
-    throw new Error('Format alamat wallet tidak dikenali. Gunakan format EVM (0x...), Solana, SUI, Aptos, atau Cosmos.')
+    throw new Error('Format alamat tidak dikenali. Gunakan EVM (0x...), Solana, SUI, Aptos, atau Cosmos.')
   }
 
-  // Filter chains compatible with the address type
-  const compatibleChains = selectedChains.filter(chain => {
-    const config = NETWORK_MAP[chain]
-    if (!config) return false
-    // EVM addresses work for all EVM chains
-    if (addressType === 'evm' && config.addressType === 'evm') return true
-    // Non-EVM: must match exactly
-    if (addressType === config.addressType) return true
-    return false
-  })
+  const compatibleChains = getCompatibleChains(address, selectedChains)
 
   if (compatibleChains.length === 0) {
-    throw new Error(`Alamat ${addressType.toUpperCase()} tidak kompatibel dengan jaringan yang dipilih.`)
+    throw new Error(`Alamat ${addressType.toUpperCase()} tidak cocok dengan jaringan yang dipilih.`)
   }
 
-  // Fetch airdrops + values in parallel for all compatible chains
-  const results = await Promise.allSettled(
-    compatibleChains.flatMap(chain => [
-      fetchAirdropsForNetwork(address, chain, apiKey),
-      fetchAirdropValue(address, chain, apiKey),
-    ])
-  )
-
-  // Check for auth errors
-  for (const result of results) {
-    if (result.status === 'rejected') {
-      if (result.reason.message === 'API_KEY_INVALID') {
-        throw new Error('API key tidak valid. Periksa kembali API key kamu di pengaturan.')
-      }
-      if (result.reason.message === 'RATE_LIMITED') {
-        throw new Error('Rate limit tercapai. Coba lagi dalam beberapa saat.')
-      }
-    }
+  // Try Drops.bot API if user has key
+  const apiKey = localStorage.getItem('glowx_drops_api_key')
+  
+  if (apiKey) {
+    return await fetchFromDropsAPI(address, compatibleChains, addressType, apiKey)
   }
 
-  // Process airdrop results
-  const airdrops = []
-  const valueByNetwork = {}
-
-  for (const result of results) {
-    if (result.status !== 'fulfilled' || !result.value) continue
-    const { network, networkLabel, data } = result.value
-
-    // Value endpoint response
-    if (data?.total_value !== undefined || data?.totalValue !== undefined || data?.value !== undefined) {
-      valueByNetwork[network] = data.total_value || data.totalValue || data.value || data.formatted_value || '0'
-      continue
-    }
-
-    // Airdrops endpoint response
-    if (data?.airdrops && Array.isArray(data.airdrops)) {
-      for (const drop of data.airdrops) {
-        airdrops.push({
-          name: drop.name || drop.title || 'Unknown Airdrop',
-          token: drop.token || drop.symbol || '',
-          chain: networkLabel,
-          chainId: network,
-          status: mapStatus(drop.status),
-          value: drop.value || drop.usd_value || null,
-          amount: drop.amount ? `${drop.amount} ${drop.token || ''}`.trim() : null,
-          claimUrl: drop.claim_url || drop.claimUrl || null,
-          deadline: drop.deadline || drop.expires_at || null,
-          description: drop.description || '',
-        })
-      }
-    }
-
-    // Some APIs return as array directly
-    if (Array.isArray(data)) {
-      for (const drop of data) {
-        airdrops.push({
-          name: drop.name || drop.title || 'Unknown Airdrop',
-          token: drop.token || drop.symbol || '',
-          chain: networkLabel,
-          chainId: network,
-          status: mapStatus(drop.status),
-          value: drop.value || drop.usd_value || null,
-          amount: drop.amount ? `${drop.amount} ${drop.token || ''}`.trim() : null,
-          claimUrl: drop.claim_url || drop.claimUrl || null,
-          deadline: drop.deadline || drop.expires_at || null,
-          description: drop.description || '',
-        })
-      }
-    }
-
-    // If response has success: true and contains data differently
-    if (data?.success && data?.data) {
-      const items = Array.isArray(data.data) ? data.data : [data.data]
-      for (const drop of items) {
-        airdrops.push({
-          name: drop.name || drop.title || 'Unknown Airdrop',
-          token: drop.token || drop.symbol || '',
-          chain: networkLabel,
-          chainId: network,
-          status: mapStatus(drop.status),
-          value: drop.value || drop.usd_value || null,
-          amount: drop.amount ? `${drop.amount} ${drop.token || ''}`.trim() : null,
-          claimUrl: drop.claim_url || drop.claimUrl || null,
-          deadline: drop.deadline || drop.expires_at || null,
-          description: drop.description || '',
-        })
-      }
-    }
-  }
-
-  // Sort: claimable first, then unclaimed, then others
-  const statusOrder = { claimable: 0, unclaimed: 1, expired: 2, claimed: 3 }
-  airdrops.sort((a, b) => (statusOrder[a.status] || 99) - (statusOrder[b.status] || 99))
-
-  // Calculate total value
-  const totalValue = Object.values(valueByNetwork).reduce((sum, val) => {
-    const num = typeof val === 'string' ? parseFloat(val.replace(/[^0-9.]/g, '')) : (val || 0)
-    return sum + (isNaN(num) ? 0 : num)
-  }, 0)
-
+  // No API key — return redirect info (free mode)
   return {
+    mode: 'redirect',
     address,
     addressType,
     checkedChains: compatibleChains.length,
     compatibleChains: compatibleChains.map(c => NETWORK_MAP[c]?.label || c),
-    airdrops,
-    totalValue,
-    valueByNetwork,
+    dropsUrl: getDropsUrl(address),
+    airdrops: [],
+    totalValue: 0,
     timestamp: new Date().toISOString(),
-    dropsUrl: `https://drops.bot/address/${address}`,
   }
 }
 
 /**
- * Map various status strings to our standard format
+ * Fetch from Drops.bot API with key
  */
+async function fetchFromDropsAPI(address, chains, addressType, apiKey) {
+  const networkName = addressType === 'evm' ? 'evm' : addressType
+
+  const results = await Promise.allSettled([
+    // Airdrops list
+    fetch(`https://api.drops.bot/shared/v1/airdrops/${networkName}/${address}`, {
+      headers: { 'x-api-key': apiKey },
+    }).then(r => {
+      if (r.status === 401) throw new Error('API_KEY_INVALID')
+      if (r.status === 429) throw new Error('RATE_LIMITED')
+      return r.ok ? r.json() : null
+    }),
+    // Value
+    fetch(`https://api.drops.bot/shared/v1/value/airdrops/${networkName}/${address}`, {
+      headers: { 'x-api-key': apiKey },
+    }).then(r => r.ok ? r.json() : null),
+  ])
+
+  // Check for errors
+  for (const r of results) {
+    if (r.status === 'rejected') {
+      if (r.reason?.message === 'API_KEY_INVALID') {
+        throw new Error('API key tidak valid.')
+      }
+      if (r.reason?.message === 'RATE_LIMITED') {
+        throw new Error('Rate limit. Coba lagi nanti.')
+      }
+    }
+  }
+
+  const airdropsData = results[0].status === 'fulfilled' ? results[0].value : null
+  const valueData = results[1].status === 'fulfilled' ? results[1].value : null
+
+  // Parse airdrops
+  const airdrops = []
+  const rawAirdrops = airdropsData?.airdrops || airdropsData?.data || (Array.isArray(airdropsData) ? airdropsData : [])
+  
+  for (const drop of rawAirdrops) {
+    airdrops.push({
+      name: drop.name || drop.title || 'Airdrop',
+      token: drop.token || drop.symbol || '',
+      chain: chains.map(c => NETWORK_MAP[c]?.label).filter(Boolean).join(', '),
+      status: mapStatus(drop.status),
+      value: drop.value || drop.usd_value || null,
+      amount: drop.amount ? `${drop.amount} ${drop.token || ''}`.trim() : null,
+      claimUrl: drop.claim_url || drop.claimUrl || null,
+      deadline: drop.deadline || drop.expires_at || null,
+    })
+  }
+
+  // Sort
+  const order = { claimable: 0, unclaimed: 1, expired: 2, claimed: 3 }
+  airdrops.sort((a, b) => (order[a.status] || 99) - (order[b.status] || 99))
+
+  const totalValue = valueData?.total_value || valueData?.totalValue || valueData?.value || 0
+
+  return {
+    mode: 'api',
+    address,
+    addressType,
+    checkedChains: chains.length,
+    compatibleChains: chains.map(c => NETWORK_MAP[c]?.label || c),
+    dropsUrl: getDropsUrl(address),
+    airdrops,
+    totalValue: typeof totalValue === 'string' ? parseFloat(totalValue.replace(/[^0-9.]/g, '')) || 0 : totalValue,
+    timestamp: new Date().toISOString(),
+  }
+}
+
 function mapStatus(status) {
   if (!status) return 'unclaimed'
   const s = status.toLowerCase()
@@ -289,4 +180,17 @@ function mapStatus(status) {
   if (s.includes('expire') || s.includes('miss')) return 'expired'
   if (s.includes('claimed') || s.includes('done')) return 'claimed'
   return 'unclaimed'
+}
+
+/**
+ * Save/get/remove API key helpers
+ */
+export function getApiKey() {
+  return localStorage.getItem('glowx_drops_api_key') || ''
+}
+export function saveApiKey(key) {
+  localStorage.setItem('glowx_drops_api_key', key)
+}
+export function removeApiKey() {
+  localStorage.removeItem('glowx_drops_api_key')
 }
